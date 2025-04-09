@@ -37,11 +37,15 @@ def run_yolo_inference(video_path=None, source_cam=0, save_output=True, conf_thr
         out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
     
     # Process frames
+    frame_count = 0
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
+            print("End of video stream or error reading frame.")
             break
             
+        frame_count += 1
+        
         # Run YOLOv8 inference on the frame
         results = model(frame, conf=conf_threshold)
         
@@ -55,9 +59,18 @@ def run_yolo_inference(video_path=None, source_cam=0, save_output=True, conf_thr
         if save_output:
             out.write(annotated_frame)
         
-        # Break if 'q' is pressed
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        # Use a shorter wait time for real-time processing
+        # but make sure we can still exit with 'q'
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q') or key == 27:  # q or ESC
+            print("User terminated the process.")
             break
+            
+        # Safety check - if no frames processed in 5 seconds, exit
+        if video_path is None and frame_count > 150:  # Assuming ~30fps, check after 5 seconds
+            if not ret:
+                print("No frames being received from camera. Exiting.")
+                break
     
     # Clean up
     cap.release()
@@ -88,11 +101,21 @@ def process_single_image(image_path, conf_threshold=0.25, save_output=True):
     # Run inference
     results = model(image, conf=conf_threshold)
     
+    # Print detection results
+    print(f"Detections in {image_path}:")
+    for i, detection in enumerate(results[0].boxes):
+        class_id = int(detection.cls)
+        class_name = results[0].names[class_id]
+        confidence = float(detection.conf)
+        bbox = detection.xyxy[0].tolist()  # x1, y1, x2, y2 format
+        print(f"  {i+1}. {class_name}: {confidence:.2f} at position {[round(x) for x in bbox]}")
+    
     # Visualize results
     annotated_image = results[0].plot()
     
     # Display result
     cv2.imshow("YOLOv8 Inference", annotated_image)
+    print("Press any key to close the image window...")
     cv2.waitKey(0)
     cv2.destroyAllWindows()
     
@@ -101,6 +124,9 @@ def process_single_image(image_path, conf_threshold=0.25, save_output=True):
         output_path = 'yolo_output.jpg'
         cv2.imwrite(output_path, annotated_image)
         print(f"Output saved to {output_path}")
+        
+    # Return detection results for potential further use
+    return results[0]
 
 def batch_process_frames(frames_directory, conf_threshold=0.25, save_output=True):
     """
